@@ -1,58 +1,89 @@
 from scapy.all import *
-import logging 
-import smtplib
+import logging
 import sys
+import signal
 
-logging.basicConfig(filename='attackdetect.log', level=logging.INFO, format='%(asctime)s %(message)s')
+logging.basicConfig(filename='attackdetect.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
+logger = logging.getLogger()
+handler = logging.FileHandler('attackdetect.log')
+formatter = logging.Formatter('%(asctime)s %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 syn_count = {}
-packet_count=0
-THRESHOLD=100
-DDOS_THRESHOLD=1000
+packet_count = 0
+THRESHOLD = 100
+DDOS_THRESHOLD = 1000
 
-def capture_traffic():
-	sniff(prn=analyze_packet, store=0)
+attack_detected = False
+sniffer = None
+
+def capture_traffic(interface="Wi-Fi"):
+    global sniffer
+    print("Starting sniffer on interface:", interface)
+    sniffer = AsyncSniffer(prn=analyze_packet, store=0, iface=interface)
+    sniffer.start()
+    sniffer.join()
 
 def analyze_packet(packet):
-	if packet.haslayer(TCP):
-		detect_syn_flood(packet)
-	if packet.haslayer(IP):
-		detect_ddos(packet)
-	if packet.haslayer(ICMP):
-		detect_ping_of_death(packet)
+    print(f"Analyzing packet: {packet.summary()} (Length: {len(packet)})")
+    if packet.haslayer(TCP):
+        if packet[TCP].flags == "S":
+            detect_syn_flood(packet)
+    elif packet.haslayer(IP):
+        detect_ddos(packet)
+    elif packet.haslayer(ICMP) and packet[ICMP].type == 8:
+        detect_ping_of_death(packet)
+    else:
+        logging.info(f"Normal traffic: {packet.summary()}")
+    logger.handlers[0].flush()
 
 def detect_syn_flood(packet):
-	if packet[TCP]. flags == "S":
-		src_ip = packet[IP].src
-		if src_ip not in syn_count:
-			syn_count[src_ip] = 0
-		syn_count[src_ip] += 1
-		if syn_count[src_ip] > THRESHOLD:
-			log_attack(f"SYN FLOOD ATTACK DETECTED FROM IP: {src_ip}")
+    global attack_detected
+    src_ip = packet[IP].src
+    if src_ip not in syn_count:
+        syn_count[src_ip] = 0
+    syn_count[src_ip] += 1
+    if syn_count[src_ip] > THRESHOLD:
+        log_attack(f"SYN Flood attack detected from IP: {src_ip}")
+        attack_detected = True
 
 def detect_ddos(packet):
-	global packet_count
-	packet_count += 1 
-	if packet_count > DDOS_THRESHOLD:
-		log_attack("POTENTIAL DDoS ATTACK DETECTED")
+    global packet_count
+    global attack_detected
+    packet_count += 1
+    if packet_count > DDOS_THRESHOLD:
+        log_attack("Potential DDoS attack detected")
+        attack_detected = True
 
 def detect_ping_of_death(packet):
-	if packet[ICMP].type == 8:
-		if len(packet) > 65535:
-			log_attack(f"PING OF DEATH DETECTED FROM IP: {packet[IP].src}")
+    global attack_detected
+    print(f"Checking for Ping of Death: {len(packet)} bytes")
+    if len(packet) == 65000:
+        log_attack(f"Ping of Death detected from IP: {packet[IP].src}")
+        attack_detected = True
 
 def log_attack(message):
-	logging.info(message)
-	print(message)
-	send_alrt(message)
-	sys.exit()
+    logging.info(message)
+    print(f"Logging attack: {message}")
+    stop_sniffing()
+    print("Attack logged and processed")
+    logger.handlers[0].flush()
 
-def send_alrt(message):
-	server = smtplib.SMTP('smtp.gmail.com', 587)
-	server.starttls()
-	server.login('pencilcream98@gmail.com', 'Tortotas5')
-	server.sendmail('pencilcream09@gmail.com', 'pencilcream98@gmail.com', message)
-	server.quit()
+def handle_signal(signal, frame):
+    print("Script stopped by user.")
+    stop_sniffing()
+    sys.exit(0)
+
+def stop_sniffing():
+    global sniffer
+    if sniffer and sniffer.running:
+        sniffer.stop()
+    print("Sniffer stopped")
 
 if __name__ == "__main__":
-	capture_traffic()
+    signal.signal(signal.SIGINT, handle_signal)
+    try:
+        capture_traffic(interface="Wi-Fi")
+    except KeyboardInterrupt:
+        handle_signal(None, None)
