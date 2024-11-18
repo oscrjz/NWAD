@@ -20,23 +20,21 @@ sniffer = None
 
 def capture_traffic(interface="Wi-Fi"):
     global sniffer
-    print("Starting sniffer on interface:", interface)
+    print(f"Starting sniffer on interface: {interface}")
     sniffer = AsyncSniffer(prn=analyze_packet, store=0, iface=interface)
+    print("Sniffer started")
     sniffer.start()
     sniffer.join()
 
 def analyze_packet(packet):
-    print(f"Analyzing packet: {packet.summary()} (Length: {len(packet)})")
+    print(f"Packet captured: {packet.summary()} (Length: {len(packet)})")
     if packet.haslayer(TCP):
         if packet[TCP].flags == "S":
             detect_syn_flood(packet)
     elif packet.haslayer(IP):
         detect_ddos(packet)
-    elif packet.haslayer(ICMP) and packet[ICMP].type == 8:
-        detect_ping_of_death(packet)
-    else:
-        logging.info(f"Normal traffic: {packet.summary()}")
-    logger.handlers[0].flush()
+    elif packet.haslayer(ICMP):
+        print(f"ICMP packet detected: {packet.summary()} (Length: {len(packet)})")
 
 def detect_syn_flood(packet):
     global attack_detected
@@ -54,13 +52,6 @@ def detect_ddos(packet):
     packet_count += 1
     if packet_count > DDOS_THRESHOLD:
         log_attack("Potential DDoS attack detected")
-        attack_detected = True
-
-def detect_ping_of_death(packet):
-    global attack_detected
-    print(f"Checking for Ping of Death: {len(packet)} bytes")
-    if len(packet) == 65000:
-        log_attack(f"Ping of Death detected from IP: {packet[IP].src}")
         attack_detected = True
 
 def log_attack(message):
