@@ -13,7 +13,7 @@ logger.addHandler(handler)
 syn_count = {}
 packet_count = 0
 THRESHOLD = 100
-DDOS_THRESHOLD = 1000
+DDOS_THRESHOLD = 100
 
 attack_detected = False
 sniffer = None
@@ -28,13 +28,15 @@ def capture_traffic(interface="Wi-Fi"):
 
 def analyze_packet(packet):
     print(f"Packet captured: {packet.summary()} (Length: {len(packet)})")
-    if packet.haslayer(TCP):
-        if packet[TCP].flags == "S":
+    if packet.haslayer(IP):
+        if packet.haslayer(TCP) and packet[TCP].flags == "S":
             detect_syn_flood(packet)
-    elif packet.haslayer(IP):
         detect_ddos(packet)
     elif packet.haslayer(ICMP):
         print(f"ICMP packet detected: {packet.summary()} (Length: {len(packet)})")
+    else:
+        print(f"Non-IP packet detected: {packet.summary()}")
+
 
 def detect_syn_flood(packet):
     global attack_detected
